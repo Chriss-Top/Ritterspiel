@@ -17,6 +17,7 @@ Bausteinen eine Burg, dann verteidigen sie sie gegen freche Raubritter.
 | Bauen und reparieren | E | Shift rechts |
 
 Im Spiel für **einen Ritter** (Taste `1` im Startbild) gehen beide Tastensätze.
+Mit `L` im Startbild schaltet ihr **unendlich Leben** an oder aus.
 `P` = Pause, `M` = Ton an/aus.
 
 ## So wird gespielt
@@ -27,9 +28,14 @@ Im Spiel für **einen Ritter** (Taste `1` im Startbild) gehen beide Tastensätze
 2. **Kampf:** Die Raubritter wollen den Burgturm erobern. Haut sie mit dem
    Schwert in die Flucht, schießt mit dem Katapult (davor stellen und Schwert-Taste drücken)
    und repariert kaputte Mauern (*Bauen* gedrückt halten). Die Armbrust schießt von allein.
-   Wer zu viel abbekommt, ruht sich kurz aus und ist gleich wieder da.
-3. **Geldsäcke** einsammeln, die im Burghof auftauchen oder die fliehende Ritter fallen lassen.
-4. **Markt** nach jeder Welle: bessere Schwerter und Schilder, ein Pferd,
+   Wer zu viel abbekommt, schwenkt die weiße Fahne, ruht sich kurz aus und ist gleich wieder da
+   (bei *unendlich Leben* passiert den Rittern gar nichts).
+3. **Schwerter aufheben:** Besiegte Feinde lassen oft ihr Schwert fallen. Lauft darüber:
+   Ist es besser als eures, bekommt ihr es sofort. Sonst gibt es 2 Taler dafür.
+   Schwerter: Holz → Eisen → Gold → **Laserschwert** (das Allerstärkste!).
+   Der Schwarze Ritter hat übrigens nur ein Holzschwert.
+4. **Geldsäcke** einsammeln, die im Burghof auftauchen oder die fliehende Ritter fallen lassen.
+5. **Markt** nach jeder Welle: bessere Schwerter und Schilder, ein Pferd,
    neue Bausteine, Katapulte, Armbrüste oder Burg heilen.
 
 Wer alle 5 Wellen übersteht (am Ende kommt der Schwarze Ritter!), hat gewonnen.

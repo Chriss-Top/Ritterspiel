@@ -19,7 +19,9 @@ const ITEMS = ['wall', 'catapult', 'crossbow'];
 const ITEM_NAME = { wall: 'Mauer', catapult: 'Katapult', crossbow: 'Armbrust' };
 const ITEM_HP = { wall: 10, catapult: 6, crossbow: 6 };
 
-const SWORD_NAME = ['', 'Holzschwert', 'Eisenschwert', 'Goldschwert'];
+const SWORD_NAME = ['', 'Holzschwert', 'Eisenschwert', 'Goldschwert', 'Laserschwert'];
+const SWORD_DMG = [0, 1, 2, 3, 5];
+const MAX_SWORD = 4;
 const SHIELD_NAME = ['', 'Holzschild', 'Eisenschild', 'Goldschild'];
 const SHIELD_PROTECT = [0, 0.3, 0.55, 0.8];
 
@@ -27,7 +29,7 @@ const ENEMY = {
   foot:   { hp: 3,  speed: 45, dmg: 1,   r: 18, tunic: '#d64545', plume: '#ffd23f', scale: 1 },
   rider:  { hp: 5,  speed: 85, dmg: 1.5, r: 22, tunic: '#8e44ad', plume: '#ff8c1a', scale: 1, horse: true },
   archer: { hp: 2,  speed: 40, dmg: 1,   r: 18, tunic: '#e67e22', plume: '#d64545', scale: 1, range: 280 },
-  boss:   { hp: 30, speed: 28, dmg: 3,   r: 30, tunic: '#2c2c3a', plume: '#e0262f', scale: 1.6 },
+  boss:   { hp: 30, speed: 28, dmg: 2,   r: 30, tunic: '#2c2c3a', plume: '#e0262f', scale: 1.6 },
 };
 
 const WAVES = [
@@ -97,6 +99,7 @@ function noise(d, v, freq = 1200) {
 }
 const SFX = {
   swing() { noise(0.12, 0.25, 3000); },
+  laser() { tone(140, 0.3, 'sawtooth', 0.06, 520); tone(280, 0.3, 'square', 0.03, 900); },
   hit() { tone(330, 0.1, 'square', 0.08, 160); },
   clang() { tone(1200, 0.12, 'triangle', 0.07, 900); },
   coin() { tone(988, 0.08, 'square', 0.06); tone(1319, 0.18, 'square', 0.06, null, 0.08); },
@@ -159,6 +162,7 @@ function star(x, y, r, color) {
 // ---------- Spielzustand ----------
 let mode = 'title';      // 'title' oder 'play'
 let titlePlayers = 2;
+let titleInfinite = false;
 let game = null;
 
 function makePlayer(id, n) {
@@ -178,7 +182,7 @@ function makePlayer(id, n) {
   };
 }
 
-function newGame(n) {
+function newGame(n, infinite = false) {
   const grid = [];
   for (let c = 0; c < COLS; c++) grid.push(new Array(ROWS).fill(null));
   const keep = { type: 'keep', c: KEEP.c, r: KEEP.r, w: 2, h: 2, hp: 30, max: 30, hurt: 0, anim: 0 };
@@ -189,7 +193,8 @@ function newGame(n) {
     state: 'build', waveIdx: 0, coins: 0,
     inv: { wall: 20, catapult: 1, crossbow: 1 },
     grid, keep, structs: [keep], players,
-    enemies: [], shots: [], bags: [], parts: [], floaters: [],
+    enemies: [], shots: [], bags: [], swords: [], parts: [], floaters: [],
+    infinite,
     spawnQueue: [], spawnTimer: 0, bagTimer: 2, waveDone: false, endTimer: 0,
     banner: null, bell: { swing: 0 },
     market: { cur: [0, 1], ready: [false, false] },
@@ -313,15 +318,22 @@ function ringBell() {
   game.waveDone = false;
   showBanner(`Welle ${game.waveIdx + 1}!`, game.waveIdx === WAVES.length - 1 ? 'Der Schwarze Ritter kommt!' : 'Die Raubritter kommen!', 2.5);
 }
+function enemySwordLevel(type) {
+  if (type === 'boss') return 1;      // der Schwarze Ritter hat nur ein Holzschwert!
+  if (type === 'archer') return 0;    // Schützen haben eine Armbrust
+  const w = game.waveIdx, r = Math.random();
+  const laser = 0.02 + 0.02 * w, gold = laser + 0.05 + 0.1 * w, iron = gold + 0.25 + 0.1 * w;
+  return r < laser ? 4 : r < gold ? 3 : r < iron ? 2 : 1;
+}
 function spawnEnemy(type) {
   const d = ENEMY[type];
   const hp = type === 'boss' ? d.hp : Math.ceil(d.hp * (1 + 0.2 * game.waveIdx));
   game.enemies.push({
     type, ...d, hp, max: hp,
     x: W + 40, y: rand(50, WORLD_H - 50),
-    atkCd: 1, swing: 0, hurt: 0, walk: rand(0, 5), flee: false, kx: 0, ky: 0, dir: -1, moving: true,
+    sword: enemySwordLevel(type), atkCd: 1, swing: 0, hurt: 0, walk: rand(0, 5), flee: false, kx: 0, ky: 0, dir: -1, moving: true,
   });
-  if (type === 'boss') showBanner('Der Schwarze Ritter!', 'Haltet zusammen!', 2.5);
+  if (type === 'boss') showBanner('Der Schwarze Ritter!', 'Hihi, er hat nur ein Holzschwert!', 3);
 }
 function startMarket() {
   game.state = 'market';
@@ -356,6 +368,10 @@ function defeat(e) {
   e.flee = true;
   e.hurt = 0;
   SFX.flee();
+  if (e.sword > 0 && (e.type === 'boss' || Math.random() < 0.7)) {
+    game.swords.push({ x: e.x + rand(-12, 12), y: clamp(e.y + rand(-6, 6), 20, WORLD_H - 10), level: e.sword, t: 0 });
+    e.sword = 0;
+  }
   if (e.type === 'boss') {
     for (let i = 0; i < 6; i++) spawnBag(e.x + rand(-60, 60), clamp(e.y + rand(-60, 60), 30, WORLD_H - 20));
     floater(e.x, e.y - 90, 'Der Schwarze Ritter flieht!', '#ffd23f', false, 26);
@@ -366,14 +382,15 @@ function defeat(e) {
 }
 function hurtPlayer(p, d) {
   if (p.ko > 0) return;
-  p.hp -= d * (1 - SHIELD_PROTECT[p.shield]);
   p.hurt = 0.3;
   SFX.clang();
+  if (game.infinite) return;          // unendlich Leben: nichts passiert
+  p.hp -= d * (1 - SHIELD_PROTECT[p.shield]);
   if (p.hp <= 0) {
     p.hp = 0;
     p.ko = 4;
     SFX.hurt();
-    floater(p.x, p.y - 80, 'Autsch! Kurz ausruhen...', '#fff');
+    floater(p.x, p.y - 95, 'Weiße Fahne! Kurz ausruhen...', '#fff');
   }
 }
 function nearestEnemy(x, y, range) {
@@ -497,6 +514,24 @@ function updatePlayer(p, dt) {
     }
   }
 
+  // Schwerter der Feinde aufheben
+  for (const sw of game.swords) {
+    if (sw.taken || Math.hypot(sw.x - p.x, sw.y - p.y) > 34) continue;
+    sw.taken = true;
+    if (sw.level > p.sword) {
+      p.sword = sw.level;
+      const laser = sw.level === 4;
+      floater(p.x, p.y - 95, laser ? 'LASERSCHWERT!!!' : `${SWORD_NAME[sw.level]}!`, laser ? '#7df9ff' : '#ffd23f', false, laser ? 32 : 24);
+      burst(p.x, p.y - 40, laser ? '#7df9ff' : '#ffd23f', laser ? 24 : 12, 160, 'star', 6);
+      SFX.buy();
+      if (laser) SFX.laser();
+    } else {
+      game.coins += 2;
+      floater(p.x, p.y - 85, 'Altes Schwert: +2 Taler', '#ffd23f', false, 18);
+      SFX.coin();
+    }
+  }
+
   // Aktionstaste (Schwert / Glocke / Katapult / Auswahl)
   if (wasPressed(k.action)) {
     const bc = { x: BELL.c * T + 32, y: BELL.r * T + 40 };
@@ -560,18 +595,20 @@ function repair(p, s) {
 function swingSword(p) {
   p.swing = 0.25;
   p.swingCd = 0.33;
-  SFX.swing();
+  if (p.sword === 4) SFX.laser(); else SFX.swing();
   for (const e of game.enemies) {
     if (e.flee) continue;
     const dx = e.x - p.x, dy = e.y - p.y;
     const d = Math.hypot(dx, dy) || 1;
     if (d < 58 + e.r * 0.6 && (dx * p.dir > -12 || d < 28)) {
-      damageEnemy(e, p.sword, dx / d * 220, dy / d * 220);
+      damageEnemy(e, SWORD_DMG[p.sword], dx / d * 220, dy / d * 220);
     }
   }
 }
 
 function updateBags(dt) {
+  for (const sw of game.swords) sw.t += dt;
+  game.swords = game.swords.filter((sw) => !sw.taken && sw.t < 25);
   for (const b of game.bags) b.t += dt;
   game.bags = game.bags.filter((b) => !b.taken);
   if (game.state === 'wave') {
@@ -740,7 +777,7 @@ function updateShots(dt) {
 // ---------- Markt ----------
 const SHOP = [
   { id: 'sword', name: 'Besseres Schwert', per: true,
-    price: (p) => (p.sword < 3 ? [0, 12, 25][p.sword] : null),
+    price: (p) => (p.sword < MAX_SWORD ? [0, 12, 25, 45][p.sword] : null),
     apply: (p) => { p.sword++; return SWORD_NAME[p.sword]; } },
   { id: 'shield', name: 'Besserer Schild', per: true,
     price: (p) => (p.shield < 3 ? [0, 10, 20][p.shield] : null),
@@ -909,26 +946,55 @@ function drawShield(x, y, level, emblem) {
   ctx.fillRect(-6, -3.5, 12, 3.2);
   ctx.restore();
 }
-function drawSword(level, swing, hx = 11, hy = -24) {
-  const col = ['#c8a06a', '#dfe6ee', '#ffd23f'][level - 1];
-  const L = [22, 27, 31][level - 1];
+function drawSword(level, swing, hx = 11, hy = -24, hand = true) {
+  const laser = level === 4;
+  const col = ['#c8a06a', '#dfe6ee', '#ffd23f', '#7df9ff'][level - 1];
+  const L = [22, 27, 31, 36][level - 1];
   let a = -1.15;
   if (swing > 0) a = -2.3 + (1 - swing / 0.25) * 3.2;
   if (swing > 0) {
-    ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+    ctx.strokeStyle = laser ? 'rgba(125,249,255,0.8)' : 'rgba(255,255,255,0.75)';
+    ctx.lineWidth = laser ? 8 : 5; ctx.lineCap = 'round';
     ctx.beginPath(); ctx.arc(hx, hy, L + 6, -2.3, a); ctx.stroke();
   }
   ctx.save();
   ctx.translate(hx, hy);
   ctx.rotate(a);
-  ctx.fillStyle = '#6b4423'; ctx.fillRect(-7, -2, 8, 4);
-  ctx.fillStyle = col;
-  ctx.beginPath(); ctx.moveTo(3, -2.8); ctx.lineTo(3 + L, -2.8); ctx.lineTo(3 + L + 6, 0); ctx.lineTo(3 + L, 2.8); ctx.lineTo(3, 2.8); ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1; ctx.stroke();
-  ctx.fillStyle = '#8a6d3b'; ctx.fillRect(0, -7, 3.5, 14);
-  ctx.fillStyle = '#f6cfa6'; circle(-2, 0, 3.6); ctx.fill();
+  if (laser) {
+    ctx.fillStyle = '#9aa3ad'; ctx.fillRect(-9, -2.8, 12, 5.6);
+    ctx.fillStyle = '#444'; ctx.fillRect(-6, -2.8, 2, 5.6); ctx.fillRect(-2, -2.8, 2, 5.6);
+    ctx.save();
+    ctx.shadowColor = '#00e5ff'; ctx.shadowBlur = 14;
+    ctx.fillStyle = col; rr(3, -3.5, L + 4, 7, 3.5); ctx.fill();
+    ctx.restore();
+    ctx.fillStyle = '#ffffff'; rr(4, -1.5, L + 2, 3, 1.5); ctx.fill();
+  } else {
+    ctx.fillStyle = '#6b4423'; ctx.fillRect(-7, -2, 8, 4);
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.moveTo(3, -2.8); ctx.lineTo(3 + L, -2.8); ctx.lineTo(3 + L + 6, 0); ctx.lineTo(3 + L, 2.8); ctx.lineTo(3, 2.8); ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0,0,0,.35)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.fillStyle = '#8a6d3b'; ctx.fillRect(0, -7, 3.5, 14);
+  }
+  if (hand) { ctx.fillStyle = '#f6cfa6'; circle(-2, 0, 3.6); ctx.fill(); }
   ctx.restore();
+}
+function drawGroundSword(sw) {
+  if (sw.t > 21 && Math.floor(sw.t * 8) % 2 === 0) return;   // blinkt kurz vor dem Verschwinden
+  const sc = Math.min(1, sw.t * 6);
+  ctx.save();
+  ctx.translate(sw.x, sw.y);
+  ctx.scale(sc, sc);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)'; ell(0, 0, 20, 4); ctx.fill();
+  if (sw.level === 4) {
+    ctx.fillStyle = `rgba(125,249,255,${0.25 + 0.15 * Math.sin(sw.t * 6)})`;
+    ell(0, -4, 30, 10); ctx.fill();
+  }
+  ctx.translate(-16, -5 + Math.sin(sw.t * 3) * 1.5);
+  ctx.rotate(1.15 - 0.15);
+  drawSword(sw.level, 0, 0, 0, false);
+  ctx.restore();
+  if (Math.sin(sw.t * 3 + 1) > 0.92) star(sw.x + 12, sw.y - 14, 4, '#fff');
 }
 function drawHeldCrossbow() {
   ctx.save();
@@ -1015,17 +1081,12 @@ function drawKnight(x, y, o) {
 }
 
 function drawPlayer(p) {
+  const ko = p.ko > 0;
   drawKnight(p.x, p.y, {
-    tunic: p.color, plume: p.plume, dir: p.dir, walk: p.walk, moving: p.moving,
+    tunic: p.color, plume: p.plume, dir: p.dir, walk: ko ? game.t : p.walk, moving: ko ? false : p.moving,
     swing: p.swing, sword: p.sword, shield: p.shield, emblem: p.color,
-    horse: p.horse, horseColor: p.id ? '#e8e0d0' : '#8b5a2b', hurt: p.hurt, ko: p.ko > 0,
+    horse: p.horse, horseColor: p.id ? '#e8e0d0' : '#8b5a2b', hurt: p.hurt, flee: ko,
   });
-  if (p.ko > 0) {
-    for (let i = 0; i < 3; i++) {
-      const a = game.t * 4 + i * 2.1;
-      star(p.x + Math.cos(a) * 18, p.y - 32 + Math.sin(a) * 6, 6, '#ffe14d');
-    }
-  }
   // Name
   const top = p.y - (p.horse ? 100 : 76);
   txt(p.id ? 'Grün' : 'Blau', p.x, top - (showSelection(p) ? 30 : 0), 14, p.color, 'center', '#fff');
@@ -1051,7 +1112,7 @@ function drawSelection(p, top) {
 function drawEnemy(e) {
   drawKnight(e.x, e.y, {
     tunic: e.tunic, plume: e.plume, dir: e.dir, walk: e.walk, moving: e.moving || e.flee,
-    swing: e.weapon === 'crossbow' ? 0 : (e.swing > 0 ? e.swing * 0.83 : 0), sword: e.type === 'boss' ? 3 : 2, shield: 1,
+    swing: e.weapon === 'crossbow' ? 0 : (e.swing > 0 ? e.swing * 0.83 : 0), sword: e.sword || 1, shield: 1,
     emblem: '#2b1d12', helmet: e.type === 'boss' ? '#4a4a55' : '#9aa3ad', angry: !e.flee,
     horse: e.horse, horseColor: '#5a3a22', hurt: e.hurt, flee: e.flee, scale: e.scale,
     weapon: e.type === 'archer' ? 'crossbow' : 'sword',
@@ -1310,6 +1371,7 @@ function drawWorld() {
   for (const s of game.structs) list.push({ y: s.type === 'keep' ? (s.r + 2) * T - 12 : s.r * T + 10, f: () => drawStruct(s) });
   list.push({ y: BELL.r * T + 10, f: drawBell });
   for (const b of game.bags) list.push({ y: b.y, f: () => drawBag(b) });
+  for (const sw of game.swords) list.push({ y: sw.y, f: () => drawGroundSword(sw) });
   for (const p of game.players) list.push({ y: p.y, f: () => drawPlayer(p) });
   for (const e of game.enemies) list.push({ y: e.y, f: () => drawEnemy(e) });
   list.sort((a, b) => a.y - b.y);
@@ -1379,7 +1441,8 @@ function drawPlayerPanel(p, x) {
   const f = p.ko > 0 ? 0 : p.hp / p.max;
   ctx.fillStyle = 'rgba(0,0,0,0.45)'; rr(x + 66, 32, 146, 12, 5); ctx.fill();
   ctx.fillStyle = f > 0.5 ? '#6ad15a' : f > 0.25 ? '#ffd23f' : '#ff5a5a';
-  if (f > 0) { rr(x + 68, 34, Math.max(6, 142 * f), 8, 4); ctx.fill(); }
+  if (game.infinite) { ctx.fillStyle = '#6ad15a'; rr(x + 68, 34, 142, 8, 4); ctx.fill(); txt('∞', x + 139, 37, 22, '#fff'); }
+  else if (f > 0) { rr(x + 68, 34, Math.max(6, 142 * f), 8, 4); ctx.fill(); }
   ctx.save(); ctx.translate(x + 76, 64); ctx.rotate(-0.8); ctx.scale(0.8, 0.8);
   drawSword(p.sword, 0, -10, 0); ctx.restore();
   drawShield(x + 104, 60, p.shield, p.color);
@@ -1464,8 +1527,8 @@ function drawShopIcon(id, cx, cy) {
   ctx.save();
   ctx.translate(cx, cy);
   if (id === 'sword') {
-    ctx.save(); ctx.translate(-36, 34); ctx.scale(2.2, 2.2); drawSword(2, 0, 0, 0); ctx.restore();
-    ctx.save(); ctx.translate(-10, 34); ctx.scale(2.2, 2.2); drawSword(3, 0, 0, 0); ctx.restore();
+    ctx.save(); ctx.translate(-40, 34); ctx.scale(2, 2); drawSword(3, 0, 0, 0, false); ctx.restore();
+    ctx.save(); ctx.translate(-8, 38); ctx.scale(2, 2); drawSword(4, 0, 0, 0, false); ctx.restore();
   } else if (id === 'shield') {
     ctx.save(); ctx.translate(-26, 0); ctx.scale(2.6, 2.6); drawShield(0, 0, 2, '#3a7bd5'); ctx.restore();
     ctx.save(); ctx.translate(30, 0); ctx.scale(2.6, 2.6); drawShield(0, 0, 3, '#3cb04a'); ctx.restore();
@@ -1530,12 +1593,15 @@ function drawTitle(t) {
   drawKeyCard(40, 270, 'Ritter Blau', '#3a7bd5', ['W A S D', 'Leertaste', 'E'], ['laufen', 'Schwert', 'bauen']);
   if (titlePlayers === 2) drawKeyCard(W - 300, 270, 'Ritter Grün', '#3cb04a', ['Pfeiltasten', 'Enter', 'Shift rechts'], ['laufen', 'Schwert', 'bauen']);
 
-  ctx.fillStyle = 'rgba(43,29,18,0.7)'; rr(W / 2 - 300, 600, 600, 100, 20); ctx.fill();
-  txt('1 = ein Ritter      2 = zwei Ritter', W / 2, 628, 22, '#fff3c4', 'center', null);
+  ctx.fillStyle = 'rgba(43,29,18,0.75)'; rr(W / 2 - 300, 582, 600, 130, 20); ctx.fill();
+  txt('1 = ein Ritter      2 = zwei Ritter', W / 2, 606, 22, '#fff3c4', 'center', null);
   ctx.fillStyle = 'rgba(255,255,255,0.15)';
   const sx = titlePlayers === 1 ? W / 2 - 172 : W / 2 + 4;
-  rr(sx, 612, 170, 32, 10); ctx.fill();
-  if (Math.floor(t * 2) % 2 === 0) txt('Leertaste oder Enter = Los geht\'s!', W / 2, 672, 28, '#ffd23f');
+  rr(sx, 590, 170, 32, 10); ctx.fill();
+  txt('L = unendlich Leben:', W / 2 + 40, 642, 22, '#fff3c4', 'right', null);
+  ctx.fillStyle = titleInfinite ? '#3cb04a' : '#8a5a2b'; rr(W / 2 + 52, 628, 90, 28, 10); ctx.fill();
+  txt(titleInfinite ? 'AN ∞' : 'AUS', W / 2 + 97, 642, 18, '#fff', 'center', null);
+  if (Math.floor(t * 2) % 2 === 0) txt('Leertaste oder Enter = Los geht\'s!', W / 2, 684, 28, '#ffd23f');
   txt(muted ? 'M = Ton an' : 'M = Ton aus', W - 20, H - 16, 14, '#fff', 'right');
 }
 function drawKeyCard(x, y, title, color, keysList, what) {
@@ -1566,8 +1632,9 @@ function frame(now) {
     titleT += dt;
     if (justPressed.has('Digit1') || justPressed.has('Numpad1')) { titlePlayers = 1; SFX.tick(); }
     if (justPressed.has('Digit2') || justPressed.has('Numpad2')) { titlePlayers = 2; SFX.tick(); }
+    if (justPressed.has('KeyL') || justPressed.has('Digit3') || justPressed.has('Numpad3')) { titleInfinite = !titleInfinite; SFX.tick(); }
     if (justPressed.has('Space') || justPressed.has('Enter') || justPressed.has('NumpadEnter')) {
-      newGame(titlePlayers);
+      newGame(titlePlayers, titleInfinite);
       game.single = titlePlayers === 1;
       mode = 'play';
       SFX.bell();
