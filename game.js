@@ -61,6 +61,10 @@ window.addEventListener('keydown', (e) => {
   keys[e.code] = true;
 });
 window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+// Ein Klick ins Bild holt die Tastatur zum Spiel (wichtig, wenn die Seite eingebettet ist)
+canvas.tabIndex = 0;
+canvas.addEventListener('pointerdown', () => { canvas.focus(); window.focus(); initAudio(); });
+window.addEventListener('load', () => { try { canvas.focus(); } catch (e) { /* egal */ } });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
 const isDown = (list) => list.some((k) => keys[k]);
 const wasPressed = (list) => list.some((k) => justPressed.has(k));
@@ -1603,6 +1607,7 @@ function drawTitle(t) {
   txt(titleInfinite ? 'AN ∞' : 'AUS', W / 2 + 97, 642, 18, '#fff', 'center', null);
   if (Math.floor(t * 2) % 2 === 0) txt('Leertaste oder Enter = Los geht\'s!', W / 2, 684, 28, '#ffd23f');
   txt(muted ? 'M = Ton an' : 'M = Ton aus', W - 20, H - 16, 14, '#fff', 'right');
+  txt('Tipp: Erst einmal ins Bild klicken, dann gehen die Tasten.', 20, H - 16, 14, '#fff', 'left');
 }
 function drawKeyCard(x, y, title, color, keysList, what) {
   ctx.fillStyle = 'rgba(255,248,225,0.92)'; rr(x, y, 260, 170, 16); ctx.fill();
