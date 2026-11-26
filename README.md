@@ -6,7 +6,10 @@ Bausteinen eine Burg, dann verteidigen sie sie gegen freche Raubritter.
 
 ## Starten
 
-`index.html` im Browser öffnen. Es muss nichts installiert werden.
+Am einfachsten: **`Ritterburg.html`** (oder **`Kitzelburg.html`** für die sanfte Version) herunterladen
+und per Doppelklick im Browser öffnen. Jede Datei enthält das ganze Spiel, es muss nichts installiert werden.
+
+Download auf GitHub: Datei anklicken, dann oben rechts auf das Download-Symbol („Download raw file“).
 
 ## Steuerung
 
