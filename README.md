@@ -39,3 +39,21 @@ Mit `L` im Startbild schaltet ihr **unendlich Leben** an oder aus.
    neue Bausteine, Katapulte, Armbrüste oder Burg heilen.
 
 Wer alle 5 Wellen übersteht (am Ende kommt der Schwarze Ritter!), hat gewonnen.
+
+---
+
+# Kitzelburg (die sanfte Version)
+
+Im Ordner `kitzelburg/` liegt eine zweite Version **ohne Waffen und ohne Schießen**.
+Zum Spielen `kitzelburg/index.html` öffnen. Die Steuerung ist dieselbe.
+
+- **Kitzelfedern statt Schwerter:** Hühnerfeder → Pfauenfeder → Goldfeder → **Regenbogenfeder** (die stärkste).
+  Gekitzelte Schelme kichern („Hihi!“) und laufen lachend nach Hause, wenn sie nicht mehr können.
+- **Die Schelme wollen den Schatz stibitzen**, der vor dem Burgturm steht. Ist die Truhe leer, ist das Spiel verloren.
+- **Blasenmaschine statt Katapult:** pustet Seifenblasen. Kleine Schelme werden eingefangen und schweben davon,
+  große werden kurz schwindelig. Davorstellen und kitzeln drücken = sofort pusten.
+- **Bananenschalen statt Armbrust:** Schelme rutschen darauf aus, drehen sich und sausen zurück. Jede Schale hält 3 Ausrutscher.
+- **Hüpfer** mit Sprungfeder-Schuhen springen einmal über eine Mauer. **Riese Grummel** kommt in Welle 5.
+- Den Schelmen fliegt beim Lachen die **Feder vom Hut**. Aufheben lohnt sich: Ist sie besser, bekommt ihr sie.
+  Ein Schelm mit bunter Regenbogenfeder am Hut trägt die beste Feder!
+- Wer keine Puste mehr hat, macht ein kurzes **Nickerchen** (Zzz). Mit `L` im Startbild gibt es unendlich Leben.
