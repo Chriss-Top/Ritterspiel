@@ -37,9 +37,18 @@ Mit `L` im Startbild schaltet ihr **unendlich Leben** an oder aus.
    Ist es besser als eures, bekommt ihr es sofort. Sonst gibt es 2 Taler dafür.
    Schwerter: Holz → Eisen → Gold → **Laserschwert** (das Allerstärkste!).
    Der Schwarze Ritter hat übrigens nur ein Holzschwert.
-4. **Geldsäcke** einsammeln, die im Burghof auftauchen oder die fliehende Ritter fallen lassen.
+4. **Neue Bauteile:**
+   - **Wassergraben** (im Burghof): Angreifer müssen langsam hindurchschwimmen.
+   - **Zugbrücke** (im Burghof, liegt über Wasser): Davorstellen und Schwert-Taste drücken = hoch- oder runterkurbeln.
+     Unten kann man darüberlaufen, oben ist sie eine feste Sperre.
+   - **Falle** (nur draußen auf der Wiese): ein Loch mit Stöcken darüber. Ein Angreifer, der darauf tritt, plumpst hinein,
+     taucht in eurer Burg wieder auf und **hilft euch ab dann** (blauer Ritter mit Herz). Danach ist das Loch offen:
+     Stellt euch darauf und drückt *Bauen*, um es wieder abzudecken. Der Schwarze Ritter ist zu dick für die Falle.
+   - **Wackelschwert** (drinnen und draußen): ein Schwert auf einer Sprungfeder, das ständig hin und her wippt und Angreifer
+     zurückwirft. Es hat immer das beste Schwert, das einer von euch gerade hat, bis hin zum Laserschwert.
+5. **Geldsäcke** einsammeln, die im Burghof auftauchen oder die fliehende Ritter fallen lassen.
 5. **Markt** nach jeder Welle: bessere Schwerter und Schilder, ein Pferd,
-   neue Bausteine, Katapulte, Armbrüste oder Burg heilen.
+   neue Bausteine, Katapulte, Armbrüste, Wassergraben, Zugbrücken, Fallen, Wackelschwerter oder Burg heilen.
 
 Wer alle 5 Wellen übersteht (am Ende kommt der Schwarze Ritter!), hat gewonnen.
 

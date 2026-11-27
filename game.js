@@ -15,9 +15,14 @@ const KEEP = { c: 0, r: 4 };      // Burgturm (2x2 Bausteine)
 const BELL = { c: 1, r: 7 };      // Glocke zum Starten der Welle
 const FONT = '"Trebuchet MS", "Comic Sans MS", "Segoe UI", sans-serif';
 
-const ITEMS = ['wall', 'catapult', 'crossbow'];
-const ITEM_NAME = { wall: 'Mauer', catapult: 'Katapult', crossbow: 'Armbrust' };
-const ITEM_HP = { wall: 10, catapult: 6, crossbow: 6 };
+const ITEMS = ['wall', 'catapult', 'crossbow', 'moat', 'bridge', 'trap', 'wobble'];
+const ITEM_NAME = { wall: 'Mauer', catapult: 'Katapult', crossbow: 'Armbrust', moat: 'Wassergraben',
+  bridge: 'Zugbrücke', trap: 'Falle', wobble: 'Wackelschwert' };
+const ITEM_HP = { wall: 10, catapult: 6, crossbow: 6, moat: 1, bridge: 10, trap: 3, wobble: 8 };
+// Was darf wohin? Fallen nur draußen auf die Wiese, Wackelschwerter überall, der Rest in den Burghof.
+const FIELD_ITEMS = new Set(['trap', 'wobble']);
+const CASTLE_ITEMS = new Set(['wall', 'catapult', 'crossbow', 'moat', 'bridge', 'wobble']);
+const MAX_ALLIES = 8;
 
 const SWORD_NAME = ['', 'Holzschwert', 'Eisenschwert', 'Goldschwert', 'Laserschwert'];
 const SWORD_DMG = [0, 1, 2, 3, 5];
@@ -195,7 +200,8 @@ function newGame(n, infinite = false) {
   for (let i = 0; i < n; i++) players.push(makePlayer(i, n));
   game = {
     state: 'build', waveIdx: 0, coins: 0,
-    inv: { wall: 20, catapult: 1, crossbow: 1 },
+    inv: { wall: 20, catapult: 1, crossbow: 1, moat: 6, bridge: 1, trap: 2, wobble: 1 },
+    allies: [],
     grid, keep, structs: [keep], players,
     enemies: [], shots: [], bags: [], swords: [], parts: [], floaters: [],
     infinite,
@@ -229,7 +235,8 @@ function structCenter(s) {
 }
 function placeStruct(type, c, r) {
   const s = { type, c, r, w: 1, h: 1, hp: ITEM_HP[type], max: ITEM_HP[type],
-    cd: type === 'catapult' ? 1.5 : 0.5, anim: 0, hurt: 0, angle: 0, pop: 0.3 };
+    cd: type === 'catapult' ? 1.5 : 0.5, anim: 0, hurt: 0, angle: 0, pop: 0.3,
+    prog: 0, target: 0, crank: 0 };    // prog/target/crank: nur für die Zugbrücke (0 = unten, 1 = oben)
   game.grid[c][r] = s;
   game.structs.push(s);
   return s;
@@ -239,6 +246,27 @@ function removeStruct(s) {
   const i = game.structs.indexOf(s);
   if (i >= 0) game.structs.splice(i, 1);
 }
+// Wassergraben, Fallen und eine heruntergelassene Zugbrücke halten niemanden auf
+function isSolid(s) {
+  if (s.type === 'moat' || s.type === 'trap') return false;
+  if (s.type === 'bridge') return s.prog > 0.5;
+  return true;
+}
+function structAt(x, y) {
+  const c = Math.floor(x / T), r = Math.floor(y / T);
+  return c >= 0 && c < COLS && r >= 0 && r < ROWS ? game.grid[c][r] : null;
+}
+function inWater(x, y) {
+  const s = structAt(x, y);
+  return !!s && s.type === 'moat';
+}
+function isWaterTile(c, r) {
+  const s = c >= 0 && c < COLS && r >= 0 && r < ROWS ? game.grid[c][r] : null;
+  return !!s && (s.type === 'moat' || s.type === 'bridge');
+}
+function wobbleLevel() {
+  return Math.max(...game.players.map((p) => p.sword));   // das Wackelschwert wächst mit dem besten Schwert mit
+}
 function structureHit(x, y, rad) {
   const c0 = Math.floor((x - rad) / T), c1 = Math.floor((x + rad) / T);
   const r0 = Math.floor((y - rad) / T), r1 = Math.floor((y + rad) / T);
@@ -246,7 +274,7 @@ function structureHit(x, y, rad) {
     for (let r = r0; r <= r1; r++) {
       if (c < 0 || c >= COLS || r < 0 || r >= ROWS) continue;
       const s = game.grid[c][r];
-      if (!s) continue;
+      if (!s || !isSolid(s)) continue;
       const nx = clamp(x, c * T, c * T + T), ny = clamp(y, r * T, r * T + T);
       if ((x - nx) ** 2 + (y - ny) ** 2 < rad * rad) return s;
     }
@@ -262,13 +290,16 @@ function damageStruct(s, d) {
     if (s.hp <= 0) { s.hp = 0; gameOver(); }
   } else if (s.hp <= 0) {
     removeStruct(s);
+    if (s.type === 'bridge') placeStruct('moat', s.c, s.r).pop = 0;   // das Wasser bleibt
     burst(c.x, c.y, '#8f969e', 16, 200, 'dot', 7);
     burst(c.x, c.y, '#c9a66b', 8, 150);
     SFX.crash();
   }
 }
-function canBuildAt(c, r) {
-  if (c < 0 || c >= CASTLE_COLS || r < 0 || r >= ROWS) return false;
+function canBuildAt(c, r, item) {
+  if (c < 0 || c >= COLS || r < 0 || r >= ROWS) return false;
+  const field = c >= CASTLE_COLS;
+  if (field ? !FIELD_ITEMS.has(item) : !CASTLE_ITEMS.has(item)) return false;
   if (game.grid[c][r]) return false;
   if (c === BELL.c && r === BELL.r) return false;
   for (const e of game.enemies) {
@@ -278,10 +309,11 @@ function canBuildAt(c, r) {
   }
   return true;
 }
+
 function findRepair(p) {
   let best = null, bd = 40;
   for (const s of game.structs) {
-    if (s.type === 'keep' || s.hp >= s.max) continue;
+    if (s.type === 'keep' || s.type === 'moat' || s.hp >= s.max) continue;
     const nx = clamp(p.x, s.c * T, s.c * T + T), ny = clamp(p.y, s.r * T, s.r * T + T);
     const d = Math.hypot(p.x - nx, p.y - ny);
     if (d < bd) { bd = d; best = s; }
@@ -359,7 +391,7 @@ function gameOver() {
 
 // ---------- Kampf ----------
 function damageEnemy(e, d, kx = 0, ky = 0) {
-  if (e.flee) return;
+  if (e.flee || e.fall > 0) return;
   e.hp -= d;
   e.hurt = 0.2;
   const k = e.type === 'boss' ? 0.2 : 1;
@@ -400,7 +432,7 @@ function hurtPlayer(p, d) {
 function nearestEnemy(x, y, range) {
   let best = null, bd = range;
   for (const e of game.enemies) {
-    if (e.flee || e.x > W + 10) continue;
+    if (e.flee || e.fall > 0 || e.x > W + 10) continue;
     const d = Math.hypot(e.x - x, e.y - y);
     if (d < bd) { bd = d; best = e; }
   }
@@ -415,6 +447,78 @@ function fireCatapult(s, target) {
   const d = Math.hypot(tx - c.x, ty - c.y);
   game.shots.push({ kind: 'boulder', sx: c.x, sy: c.y, tx, ty, t: 0, dur: 0.6 + d / 900, peak: 80 + d * 0.25 });
   SFX.catapult();
+}
+
+// ---------- Übergelaufene Ritter (Helfer) ----------
+function makeAlly(e) {
+  if (game.allies.length >= MAX_ALLIES) {
+    floater(e.x, e.y - 70, 'Ich geh lieber nach Hause!', '#fff');
+    return;
+  }
+  let x = 0, y = 0;
+  for (let tries = 0; tries < 20; tries++) {
+    x = rand(170, CASTLE_COLS * T - 40); y = rand(50, WORLD_H - 40);
+    if (!inWater(x, y)) break;
+  }
+  const a = {
+    ally: true, type: e.type, x, y, homeX: x, homeY: y, r: e.r,
+    sword: e.sword || 1, crossbow: e.type === 'archer', horse: !!e.horse,
+    hp: 8, max: 8, dir: 1, walk: 0, moving: false, swing: 0, atkCd: 0.5, hurt: 0,
+  };
+  game.allies.push(a);
+  burst(x, y - 30, '#ffe14d', 14, 150, 'star', 6);
+  floater(x, y - 80, 'Huch! Ich helfe jetzt euch!', '#b8ffb0', false, 20);
+  SFX.buy();
+}
+function hurtAlly(a, d) {
+  a.hp -= d;
+  a.hurt = 0.3;
+  SFX.clang();
+  if (a.hp <= 0) {
+    a.gone = true;
+    burst(a.x, a.y - 30, '#fff', 12, 120, 'star', 5);
+    floater(a.x, a.y - 70, 'Puh, ich ruh mich aus!', '#fff', false, 18);
+  }
+}
+function updateAllies(dt) {
+  for (const a of game.allies) {
+    a.hurt = Math.max(0, a.hurt - dt);
+    a.swing = Math.max(0, a.swing - dt);
+    a.atkCd -= dt;
+    a.moving = false;
+    const target = game.state === 'wave' ? nearestEnemy(a.x, a.y, a.crossbow ? 420 : 460) : null;
+    let tx = a.homeX, ty = a.homeY, stop = 6;
+    if (target) {
+      a.dir = target.x < a.x ? -1 : 1;
+      const d = dist(a, target);
+      if (a.crossbow) {
+        if (d < 290) {
+          stop = 1e9;
+          if (a.atkCd <= 0) {
+            game.shots.push({ kind: 'bolt', x: a.x, y: a.y, vx: (target.x - a.x) / d * 650, vy: (target.y - a.y) / d * 650, h: 26, life: 1 });
+            a.atkCd = 1.6; a.swing = 0.3; SFX.pew();
+          }
+        } else { tx = target.x; ty = target.y; }
+      } else if (d < a.r + target.r + 10) {
+        stop = 1e9;
+        if (a.atkCd <= 0) {
+          const dd = d || 1;
+          damageEnemy(target, SWORD_DMG[a.sword], (target.x - a.x) / dd * 200, (target.y - a.y) / dd * 200);
+          a.atkCd = 0.9; a.swing = 0.25; SFX.swing();
+        }
+      } else { tx = target.x; ty = target.y; }
+    }
+    const dx = tx - a.x, dy = ty - a.y, d = Math.hypot(dx, dy);
+    if (d > stop) {
+      const sp = (a.horse ? 140 : 95) * dt * (inWater(a.x, a.y) ? 0.55 : 1);
+      a.x = clamp(a.x + dx / d * Math.min(sp, d), 16, W - 16);
+      a.y = clamp(a.y + dy / d * Math.min(sp, d), 16, WORLD_H - 6);
+      if (Math.abs(dx) > 2) a.dir = dx > 0 ? 1 : -1;
+      a.moving = true;
+      a.walk += dt;
+    }
+  }
+  game.allies = game.allies.filter((a) => !a.gone);
 }
 
 // ---------- Update ----------
@@ -448,6 +552,16 @@ function update(dt) {
   }
 
   for (const p of game.players) updatePlayer(p, dt);
+  for (const s of game.structs) {
+    if (s.type !== 'bridge') continue;
+    const before = s.prog;
+    s.prog = s.target > s.prog ? Math.min(s.target, s.prog + dt / 1.2) : Math.max(s.target, s.prog - dt / 1.2);
+    if (s.prog !== before) {
+      s.crank += dt * 10 * (s.target ? 1 : -1);
+      if (Math.floor(s.crank * 2) !== Math.floor((s.crank - dt * 10 * (s.target ? 1 : -1)) * 2)) tone(900, 0.03, 'square', 0.03);
+    }
+  }
+  updateAllies(dt);
   updateBags(dt);
   updateEnemies(dt);
   updateShots(dt);
@@ -498,7 +612,7 @@ function updatePlayer(p, dt) {
   p.moving = !!(mx || my);
   if (p.moving) {
     const len = Math.hypot(mx, my);
-    const sp = (p.horse ? 260 : 165) * dt;
+    const sp = (p.horse ? 260 : 165) * dt * (inWater(p.x, p.y) ? 0.55 : 1);
     if (mx) p.dir = mx > 0 ? 1 : -1;
     const nx = clamp(p.x + mx / len * sp, 16, W - 16);
     const ny = clamp(p.y + my / len * sp, 16, WORLD_H - 6);
@@ -539,11 +653,20 @@ function updatePlayer(p, dt) {
   // Aktionstaste (Schwert / Glocke / Katapult / Auswahl)
   if (wasPressed(k.action)) {
     const bc = { x: BELL.c * T + 32, y: BELL.r * T + 40 };
-    if (game.state === 'build') {
+    const bridge = game.structs.find((s) => s.type === 'bridge' && dist(structCenter(s), p) < 52);
+    if (bridge) {
+      bridge.target = bridge.target ? 0 : 1;
+      floater(p.x, p.y - 85, bridge.target ? 'Brücke hoch!' : 'Brücke runter!', '#fff', false, 20);
+    } else if (game.state === 'build') {
       if (Math.hypot(p.x - bc.x, p.y - bc.y) < 60) ringBell();
       else {
-        p.sel = (p.sel + 1) % ITEMS.length;
+        // zum nächsten Bauteil, von dem noch etwas da ist
+        for (let i = 1; i <= ITEMS.length; i++) {
+          const n = (p.sel + i) % ITEMS.length;
+          if (game.inv[ITEMS[n]] > 0 || i === ITEMS.length) { p.sel = n; break; }
+        }
         SFX.tick();
+        floater(p.x, p.y - 118, ITEM_NAME[ITEMS[p.sel]], '#fff', false, 16);
       }
     } else if (game.state === 'wave') {
       const cat = game.structs.find((s) => s.type === 'catapult' && dist(structCenter(s), p) < 62);
@@ -565,19 +688,20 @@ function updatePlayer(p, dt) {
     else {
       const c = Math.floor(p.x / T), r = Math.floor(p.y / T);
       const item = ITEMS[p.sel];
-      if (canBuildAt(c, r)) {
+      if (canBuildAt(c, r, item)) {
         if (game.inv[item] > 0) {
           game.inv[item]--;
           placeStruct(item, c, r);
           SFX.build();
           burst(c * T + 32, r * T + 56, '#c9a66b', 10, 120);
         } else if (p.msgCd <= 0) {
-          floater(p.x, p.y - 85, item === 'wall' ? 'Keine Bausteine mehr!' : `Kein ${ITEM_NAME[item]} mehr!`, '#ffb3b3');
+          floater(p.x, p.y - 85, item === 'wall' ? 'Keine Bausteine mehr!' : `Keine ${ITEM_NAME[item]} mehr!`, '#ffb3b3');
           SFX.no(); p.msgCd = 0.8;
         }
-      } else if (c >= CASTLE_COLS && p.msgCd <= 0) {
-        floater(p.x, p.y - 85, 'Nur im Burghof bauen!', '#ffb3b3');
-        p.msgCd = 0.8;
+      } else if (p.msgCd <= 0 && c >= 0 && c < COLS && !game.grid[c][r]) {
+        const field = c >= CASTLE_COLS;
+        if (field && !FIELD_ITEMS.has(item)) { floater(p.x, p.y - 85, `${ITEM_NAME[item]}: nur im Burghof!`, '#ffb3b3'); p.msgCd = 0.8; }
+        else if (!field && !CASTLE_ITEMS.has(item)) { floater(p.x, p.y - 85, 'Fallen gehören raus auf die Wiese!', '#ffb3b3'); p.msgCd = 0.8; }
       }
     }
   } else if (isDown(k.build) && p.buildCd <= 0) {
@@ -594,14 +718,14 @@ function repair(p, s) {
   p.swing = 0.15;
   SFX.tap();
   burst(s.c * T + 32, s.r * T + 30, '#ffe9a8', 4, 80, 'star', 4);
-  if (s.hp >= s.max) floater(s.c * T + 32, s.r * T, 'Repariert!', '#b8ffb0', false, 18);
+  if (s.hp >= s.max) floater(s.c * T + 32, s.r * T, s.type === 'trap' ? 'Falle wieder bereit!' : 'Repariert!', '#b8ffb0', false, 18);
 }
 function swingSword(p) {
   p.swing = 0.25;
   p.swingCd = 0.33;
   if (p.sword === 4) SFX.laser(); else SFX.swing();
   for (const e of game.enemies) {
-    if (e.flee) continue;
+    if (e.flee || e.fall > 0) continue;
     const dx = e.x - p.x, dy = e.y - p.y;
     const d = Math.hypot(dx, dy) || 1;
     if (d < 58 + e.r * 0.6 && (dx * p.dir > -12 || d < 28)) {
@@ -631,6 +755,11 @@ function updateEnemies(dt) {
     e.hurt = Math.max(0, e.hurt - dt);
     e.swing = Math.max(0, e.swing - dt);
     if (e.flee) { e.x += 230 * dt; e.dir = 1; e.moving = true; continue; }
+    if (e.fall > 0) {   // rutscht durch die Falle
+      e.fall -= dt;
+      if (e.fall <= 0) { e.gone = true; makeAlly(e); }
+      continue;
+    }
     if (game.state !== 'wave') continue;
 
     // Rückstoß
@@ -645,8 +774,8 @@ function updateEnemies(dt) {
     e.moving = false;
 
     let tp = null, td = 1e9;
-    for (const p of game.players) {
-      if (p.ko > 0) continue;
+    for (const p of game.players.concat(game.allies)) {
+      if (p.ko > 0 || p.gone) continue;
       const d = dist(e, p);
       if (d < td) { td = d; tp = p; }
     }
@@ -655,6 +784,7 @@ function updateEnemies(dt) {
       let target = null, best = e.range;
       if (tp && td < best) { target = { x: tp.x, y: tp.y }; best = td; }
       for (const s of game.structs) {
+        if (!isSolid(s)) continue;
         const c = structCenter(s);
         const d = Math.hypot(c.x - e.x, c.y - e.y) - (s.w || 1) * T / 2;
         if (d < best) { best = d; target = c; }
@@ -677,12 +807,14 @@ function updateEnemies(dt) {
       tx = tp.x; ty = tp.y;
       if (td < e.r + 24) {
         e.dir = tp.x < e.x ? -1 : 1;
-        if (e.atkCd <= 0) { hurtPlayer(tp, e.dmg); e.atkCd = 1.2; e.swing = 0.3; }
+        if (e.atkCd <= 0) { if (tp.ally) hurtAlly(tp, e.dmg); else hurtPlayer(tp, e.dmg); e.atkCd = 1.2; e.swing = 0.3; }
         continue;
       }
     }
     const dx = tx - e.x, dy = ty - e.y, d = Math.hypot(dx, dy) || 1;
-    const sp = e.speed * dt;
+    const swim = inWater(e.x, e.y);
+    const sp = e.speed * dt * (swim ? 0.35 : 1);
+    if (swim && Math.random() < dt * 4) burst(e.x + rand(-10, 10), e.y - 4, '#bfe6ff', 2, 60);
     const nx = e.x + dx / d * sp, ny = e.y + dy / d * sp;
     e.dir = dx < 0 ? -1 : 1;
     const s = structureHit(nx, ny, e.r);
@@ -691,9 +823,26 @@ function updateEnemies(dt) {
     } else {
       e.x = nx; e.y = ny; e.moving = true;
     }
+    // Falle?
+    const tr = structAt(e.x, e.y);
+    if (tr && tr.type === 'trap' && tr.hp >= tr.max && e.x < W - 10) {
+      if (e.type === 'boss') {
+        removeStruct(tr);
+        burst(e.x, e.y, '#8b6b3d', 14, 160, 'dot', 6);
+        floater(e.x, e.y - 110, 'Zu dick für die Falle!', '#fff', false, 22);
+        SFX.crash();
+      } else {
+        tr.hp = 0;
+        e.fall = 0.6;
+        e.moving = false;
+        floater(e.x, e.y - 70, 'Plumps!', '#fff', false, 22);
+        burst(e.x, e.y, '#8b6b3d', 10, 120);
+        tone(700, 0.5, 'sine', 0.1, 120);
+      }
+    }
   }
   // nicht übereinander stehen
-  const es = game.enemies.filter((e) => !e.flee);
+  const es = game.enemies.filter((e) => !e.flee && !(e.fall > 0));
   for (let i = 0; i < es.length; i++) {
     for (let j = i + 1; j < es.length; j++) {
       const a = es[i], b = es[j];
@@ -706,11 +855,28 @@ function updateEnemies(dt) {
       }
     }
   }
-  game.enemies = game.enemies.filter((e) => !(e.flee && e.x > W + 80));
+  game.enemies = game.enemies.filter((e) => !e.gone && !(e.flee && e.x > W + 80));
 }
 
 function updateTowers(dt) {
   for (const s of game.structs) {
+    if (s.type === 'wobble') {
+      s.cd -= dt;
+      if (s.cd <= 0) {
+        const cx = s.c * T + 32, cy = s.r * T + 40;
+        let hit = false;
+        for (const e of game.enemies) {
+          if (e.flee || e.fall > 0) continue;
+          const d = Math.hypot(e.x - cx, e.y - cy);
+          if (d < 46 + e.r) {
+            damageEnemy(e, SWORD_DMG[wobbleLevel()], (e.x - cx) / (d || 1) * 260, (e.y - cy) / (d || 1) * 120);
+            hit = true;
+          }
+        }
+        if (hit) { s.cd = 0.6; SFX.swing(); }
+      }
+      continue;
+    }
     if (s.type === 'catapult') {
       s.cd -= dt;
       if (s.cd <= 0) {
@@ -762,9 +928,9 @@ function updateShots(dt) {
         }
       }
     } else if (s.kind === 'ebolt') {
-      for (const p of game.players) {
-        if (p.ko <= 0 && Math.hypot(p.x - s.x, p.y - s.y) < 20) {
-          hurtPlayer(p, s.dmg);
+      for (const p of game.players.concat(game.allies)) {
+        if (p.ko <= 0 && !p.gone && Math.hypot(p.x - s.x, p.y - s.y) < 20) {
+          if (p.ally) hurtAlly(p, s.dmg); else hurtPlayer(p, s.dmg);
           s.dead = true;
           break;
         }
@@ -795,11 +961,19 @@ const SHOP = [
     apply: () => { game.inv.catapult++; return '+1 Katapult'; } },
   { id: 'crossbow', name: 'Armbrust', price: () => 10,
     apply: () => { game.inv.crossbow++; return '+1 Armbrust'; } },
+  { id: 'moat', name: '4x Wassergraben', price: () => 6,
+    apply: () => { game.inv.moat += 4; return '+4 Wassergraben'; } },
+  { id: 'bridge', name: 'Zugbrücke', price: () => 12,
+    apply: () => { game.inv.bridge++; return '+1 Zugbrücke'; } },
+  { id: 'trap', name: '2 Fallen', price: () => 10,
+    apply: () => { game.inv.trap += 2; return '+2 Fallen'; } },
+  { id: 'wobble', name: 'Wackelschwert', price: () => 12,
+    apply: () => { game.inv.wobble++; return '+1 Wackelschwert'; } },
   { id: 'heal', name: 'Burg heilen', price: () => (game.keep.hp < game.keep.max ? 8 : null),
     apply: () => { game.keep.hp = Math.min(game.keep.max, game.keep.hp + 10); return '+10 Herzen'; } },
   { id: 'go', name: 'Weiter!' },
 ];
-const CARD = { w: 260, h: 210, gap: 24, x0: (W - (4 * 260 + 3 * 24)) / 2, y0: 200 };
+const CARD = { w: 260, h: 152, gap: 14, x0: (W - (4 * 260 + 3 * 14)) / 2, y0: 172 };
 function cardPos(i) {
   return { x: CARD.x0 + (i % 4) * (CARD.w + CARD.gap), y: CARD.y0 + Math.floor(i / 4) * (CARD.h + CARD.gap) };
 }
@@ -813,7 +987,7 @@ function updateMarket() {
     if (wasPressed(k.left) && cur % 4 > 0) cur--;
     if (wasPressed(k.right) && cur % 4 < 3) cur++;
     if (wasPressed(k.up) && cur >= 4) cur -= 4;
-    if (wasPressed(k.down) && cur < 4) cur += 4;
+    if (wasPressed(k.down) && cur + 4 < SHOP.length) cur += 4;
     if (cur !== old) SFX.tick();
     m.cur[p.id] = cur;
     if (game.stateT > 0.4 && (wasPressed(k.action) || wasPressed(k.build))) buy(p, cur);
@@ -1084,13 +1258,45 @@ function drawKnight(x, y, o) {
   ctx.restore();
 }
 
+function drawWading(x, y, draw) {
+  // nur der Oberkörper schaut aus dem Wasser
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x - 90, y - 240, 180, 240 - 12); ctx.clip();
+  ctx.translate(0, 16);
+  draw();
+  ctx.restore();
+  const t = game.t;
+  ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+  ell(x, y - 12, 18 + Math.sin(t * 6) * 2, 5); ctx.stroke();
+}
+function drawAlly(a) {
+  const draw = () => drawKnight(a.x, a.y, {
+    tunic: '#5dade2', plume: '#ffffff', dir: a.dir, walk: a.walk, moving: a.moving,
+    swing: a.crossbow ? 0 : a.swing, sword: a.sword, shield: 1, emblem: '#ffd23f',
+    horse: a.horse, horseColor: '#5a3a22', hurt: a.hurt, weapon: a.crossbow ? 'crossbow' : 'sword',
+  });
+  if (inWater(a.x, a.y)) drawWading(a.x, a.y, draw); else draw();
+  const top = a.y - (a.horse ? 98 : 74);
+  ctx.save(); ctx.translate(a.x, top); ctx.scale(0.22, 0.22); drawHeart(0, 0, '#ff4d6d'); ctx.restore();
+  if (a.hp < a.max) {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(a.x - 18, top - 14, 36, 6);
+    ctx.fillStyle = '#6ad15a'; ctx.fillRect(a.x - 17, top - 13, 34 * a.hp / a.max, 4);
+  }
+}
 function drawPlayer(p) {
   const ko = p.ko > 0;
+  const wade = !ko && inWater(p.x, p.y);
+  if (wade) { ctx.save(); ctx.beginPath(); ctx.rect(p.x - 90, p.y - 240, 180, 228); ctx.clip(); ctx.translate(0, 16); }
   drawKnight(p.x, p.y, {
     tunic: p.color, plume: p.plume, dir: p.dir, walk: ko ? game.t : p.walk, moving: ko ? false : p.moving,
     swing: p.swing, sword: p.sword, shield: p.shield, emblem: p.color,
     horse: p.horse, horseColor: p.id ? '#e8e0d0' : '#8b5a2b', hurt: p.hurt, flee: ko,
   });
+  if (wade) {
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.lineWidth = 2;
+    ell(p.x, p.y - 12, 18 + Math.sin(game.t * 6) * 2, 5); ctx.stroke();
+  }
   // Name
   const top = p.y - (p.horse ? 100 : 76);
   txt(p.id ? 'Grün' : 'Blau', p.x, top - (showSelection(p) ? 30 : 0), 14, p.color, 'center', '#fff');
@@ -1114,6 +1320,19 @@ function drawSelection(p, top) {
 }
 
 function drawEnemy(e) {
+  if (e.fall > 0) {   // verschwindet im Loch
+    const k = e.fall / 0.6;
+    ctx.save(); ctx.translate(e.x, e.y); ctx.rotate((1 - k) * 4); ctx.scale(k, k); ctx.translate(-e.x, -e.y);
+    drawKnight(e.x, e.y, { tunic: e.tunic, plume: e.plume, dir: e.dir, walk: 0, sword: e.sword || 1, shield: 1,
+      emblem: '#2b1d12', helmet: '#9aa3ad', horse: e.horse, horseColor: '#5a3a22', scale: e.scale, flee: true });
+    ctx.restore();
+    return;
+  }
+  if (!e.flee && inWater(e.x, e.y)) { e.swimDraw = true; drawWading(e.x, e.y, () => drawEnemyBody(e)); }
+  else drawEnemyBody(e);
+  drawEnemyHp(e);
+}
+function drawEnemyBody(e) {
   drawKnight(e.x, e.y, {
     tunic: e.tunic, plume: e.plume, dir: e.dir, walk: e.walk, moving: e.moving || e.flee,
     swing: e.weapon === 'crossbow' ? 0 : (e.swing > 0 ? e.swing * 0.83 : 0), sword: e.sword || 1, shield: 1,
@@ -1121,6 +1340,8 @@ function drawEnemy(e) {
     horse: e.horse, horseColor: '#5a3a22', hurt: e.hurt, flee: e.flee, scale: e.scale,
     weapon: e.type === 'archer' ? 'crossbow' : 'sword',
   });
+}
+function drawEnemyHp(e) {
   if (!e.flee && e.hp < e.max) {
     const w = e.type === 'boss' ? 80 : 34;
     const y = e.y - (e.horse ? 92 : 78) * e.scale;
@@ -1199,8 +1420,103 @@ function drawCrossbowTower(x, y, s) {
 function drawItemIcon(item, x, y) {
   if (item === 'wall') drawWall(x, y, null);
   else if (item === 'catapult') drawCatapult(x, y, null);
-  else drawCrossbowTower(x, y, null);
+  else if (item === 'crossbow') drawCrossbowTower(x, y, null);
+  else if (item === 'moat') drawMoat(x, y, null);
+  else if (item === 'bridge') drawBridge(x, y, null);
+  else if (item === 'trap') drawTrap(x, y, null);
+  else drawWobble(x, y, null);
 }
+function drawMoat(x, y, s) {
+  const t = game ? game.t : 0;
+  ctx.fillStyle = '#3f97d6'; ctx.fillRect(x, y, T, T);
+  ctx.fillStyle = '#5bb0ea'; ctx.fillRect(x + 4, y + 4, T - 8, T - 8);
+  ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2;
+  for (let i = 0; i < 3; i++) {
+    const yy = y + 14 + i * 18;
+    ctx.beginPath();
+    for (let k = 0; k <= 4; k++) {
+      const xx = x + 6 + k * 13;
+      const wy = yy + Math.sin(t * 2.5 + k * 1.3 + i * 2 + x * 0.05) * 2.5;
+      if (k) ctx.lineTo(xx, wy); else ctx.moveTo(xx, wy);
+    }
+    ctx.stroke();
+  }
+  // Ufer, wo kein Wasser weitergeht
+  ctx.fillStyle = '#9c7a48';
+  const c = s ? s.c : -9, r = s ? s.r : -9;
+  if (!s || !isWaterTile(c, r - 1)) ctx.fillRect(x, y, T, 5);
+  if (!s || !isWaterTile(c, r + 1)) ctx.fillRect(x, y + T - 5, T, 5);
+  if (!s || !isWaterTile(c - 1, r)) ctx.fillRect(x, y, 5, T);
+  if (!s || !isWaterTile(c + 1, r)) ctx.fillRect(x + T - 5, y, 5, T);
+}
+function drawBridge(x, y, s) {
+  const prog = s ? s.prog : 0;
+  const lift = Math.sin(prog * Math.PI / 2), L = 56 * Math.cos(prog * Math.PI / 2), H = 62 * lift;
+  const hx = x + 8;
+  // Brett (klappt an der Burgseite nach oben)
+  ctx.fillStyle = '#a0703c';
+  ctx.beginPath();
+  ctx.moveTo(hx, y + 8); ctx.lineTo(hx + L, y + 8 - H); ctx.lineTo(hx + L, y + 56 - H); ctx.lineTo(hx, y + 56);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#6b4423'; ctx.lineWidth = 2; ctx.stroke();
+  ctx.beginPath();
+  for (let i = 1; i < 4; i++) { const f = i / 4; ctx.moveTo(hx + L * f, y + 8 - H * f); ctx.lineTo(hx + L * f, y + 56 - H * f); }
+  ctx.stroke();
+  if (s && s.hurt > 0) { ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.fill(); }
+  // Pfosten und Ketten
+  ctx.fillStyle = '#7a4f27';
+  ctx.fillRect(x + 1, y - 26, 7, 38); ctx.fillRect(x + 1, y + 30, 7, 32);
+  ctx.strokeStyle = '#555'; ctx.lineWidth = 2; ctx.setLineDash([3, 2]);
+  ctx.beginPath(); ctx.moveTo(x + 5, y - 22); ctx.lineTo(hx + L, y + 10 - H); ctx.moveTo(x + 5, y + 32); ctx.lineTo(hx + L, y + 54 - H); ctx.stroke();
+  ctx.setLineDash([]);
+  // Kurbel
+  const a = s ? s.crank : 0;
+  ctx.fillStyle = '#5b3a1a'; circle(x + 5, y - 6, 8); ctx.fill();
+  ctx.strokeStyle = '#d9b47c'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let k = 0; k < 4; k++) { ctx.moveTo(x + 5, y - 6); ctx.lineTo(x + 5 + Math.cos(a + k * Math.PI / 2) * 7, y - 6 + Math.sin(a + k * Math.PI / 2) * 7); }
+  ctx.stroke();
+  ctx.fillStyle = '#ffd23f'; circle(x + 5 + Math.cos(a) * 7, y - 6 + Math.sin(a) * 7, 2.5); ctx.fill();
+}
+function drawTrap(x, y, s) {
+  const cx = x + 32, cy = y + 38;
+  if (s && s.hp < s.max) {
+    ctx.fillStyle = '#2e1f12'; ell(cx, cy, 25, 15); ctx.fill();
+    ctx.fillStyle = '#120b05'; ell(cx, cy + 2, 18, 10); ctx.fill();
+    ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 3;
+    for (let i = 0; i < s.hp; i++) { ctx.beginPath(); ctx.moveTo(cx - 22, cy - 8 + i * 8); ctx.lineTo(cx + 22, cy - 4 + i * 8); ctx.stroke(); }
+    return;
+  }
+  ctx.fillStyle = '#a8875a'; ell(cx, cy, 27, 16); ctx.fill();
+  ctx.strokeStyle = '#6b4423'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(cx - 24, cy - 6); ctx.lineTo(cx + 22, cy + 8);
+  ctx.moveTo(cx - 20, cy + 9); ctx.lineTo(cx + 24, cy - 7);
+  ctx.moveTo(cx - 6, cy - 14); ctx.lineTo(cx + 4, cy + 14);
+  ctx.moveTo(cx - 26, cy + 1); ctx.lineTo(cx + 26, cy);
+  ctx.stroke();
+  ctx.fillStyle = '#6cbf4c';
+  for (const [lx, ly] of [[-12, -4], [10, 4], [2, -9], [-4, 8], [16, -6]]) { ell(cx + lx, cy + ly, 5, 2.5, lx * 0.1); ctx.fill(); }
+}
+function drawWobble(x, y, s) {
+  const t = game ? game.t : 0;
+  const phase = t * 7 + (s ? s.c * 1.7 + s.r : 0);
+  const bob = Math.sin(phase * 2) * 4;
+  ctx.fillStyle = 'rgba(0,0,0,0.2)'; ell(x + 32, y + 60, 18, 5); ctx.fill();
+  ctx.fillStyle = s && s.hurt > 0 ? '#ddd' : '#8a5a2b'; rr(x + 18, y + 48, 28, 12, 3); ctx.fill();
+  ctx.strokeStyle = '#9aa3ad'; ctx.lineWidth = 3;
+  const top = y + 26 + bob;
+  ctx.beginPath(); ctx.moveTo(x + 32, y + 48);
+  for (let i = 1; i <= 6; i++) ctx.lineTo(x + 32 + (i % 2 ? 7 : -7), y + 48 - (y + 48 - top) * i / 6);
+  ctx.stroke();
+  ctx.save();
+  ctx.translate(x + 32, top);
+  ctx.rotate(0.3 + Math.sin(phase) * 1.0);    // wippt nach vorne und nach oben
+  drawSword(s ? wobbleLevel() : 2, 0, 0, 0, false);
+  ctx.restore();
+  ctx.fillStyle = '#6b4423'; circle(x + 32, top, 4); ctx.fill();
+}
+
 function drawKeep(s) {
   const x = s.c * T, y = s.r * T;
   const flash = s.hurt > 0;
@@ -1267,7 +1583,7 @@ function drawBell() {
   if (game.state === 'build') txt('Glocke: Los!', x + 32, y + 76, 14, '#fff');
 }
 function drawStructHp(s) {
-  if (s.type === 'keep' || s.hp >= s.max) return;
+  if (s.type === 'keep' || s.type === 'moat' || s.type === 'trap' || s.hp >= s.max) return;
   const x = s.c * T + 8, y = s.r * T - 14, w = 48;
   ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(x - 1, y - 1, w + 2, 7);
   const f = Math.max(0, s.hp / s.max);
@@ -1284,7 +1600,11 @@ function drawStruct(s) {
   }
   if (s.type === 'wall') drawWall(x, y, s);
   else if (s.type === 'catapult') drawCatapult(x, y, s);
-  else drawCrossbowTower(x, y, s);
+  else if (s.type === 'crossbow') drawCrossbowTower(x, y, s);
+  else if (s.type === 'moat') drawMoat(x, y, s);
+  else if (s.type === 'bridge') drawBridge(x, y, s);
+  else if (s.type === 'trap') drawTrap(x, y, s);
+  else drawWobble(x, y, s);
   ctx.restore();
 }
 function drawBag(b) {
@@ -1360,8 +1680,8 @@ function drawWorld() {
     for (const p of game.players) {
       if (p.ko > 0) continue;
       const c = Math.floor(p.x / T), r = Math.floor(p.y / T);
-      if (!canBuildAt(c, r)) continue;
       const item = ITEMS[p.sel];
+      if (!canBuildAt(c, r, item)) continue;
       ctx.globalAlpha = game.inv[item] > 0 ? 0.35 : 0.15;
       drawItemIcon(item, c * T, r * T);
       ctx.globalAlpha = 1;
@@ -1371,8 +1691,17 @@ function drawWorld() {
       ctx.setLineDash([]);
     }
   }
+  // flache Bodenteile (Wasser, Fallen) liegen unter allem
+  for (const s of game.structs) {
+    if (s.type === 'moat' || s.type === 'trap') drawStruct(s);
+    else if (s.type === 'bridge') drawMoat(s.c * T, s.r * T, s);
+  }
   const list = [];
-  for (const s of game.structs) list.push({ y: s.type === 'keep' ? (s.r + 2) * T - 12 : s.r * T + 10, f: () => drawStruct(s) });
+  for (const s of game.structs) {
+    if (s.type === 'moat' || s.type === 'trap') continue;
+    list.push({ y: s.type === 'keep' ? (s.r + 2) * T - 12 : s.type === 'bridge' && s.prog < 0.5 ? s.r * T : s.r * T + 10, f: () => drawStruct(s) });
+  }
+  for (const a of game.allies) list.push({ y: a.y, f: () => drawAlly(a) });
   list.push({ y: BELL.r * T + 10, f: drawBell });
   for (const b of game.bags) list.push({ y: b.y, f: () => drawBag(b) });
   for (const sw of game.swords) list.push({ y: sw.y, f: () => drawGroundSword(sw) });
@@ -1414,11 +1743,11 @@ function drawHUD() {
 
   // Vorrat
   ITEMS.forEach((item, i) => {
-    const x = 600 + i * 104;
-    ctx.fillStyle = 'rgba(0,0,0,0.25)'; rr(x, 10, 96, 60, 10); ctx.fill();
-    ctx.save(); ctx.translate(x + 4, 18); ctx.scale(0.66, 0.66); drawItemIcon(item, 0, 6); ctx.restore();
-    txt(`${game.inv[item]}`, x + 72, 34, 24, game.inv[item] > 0 ? '#fff' : '#ff9a9a');
-    txt(ITEM_NAME[item], x + 72, 58, 11, '#f3e3bd', 'center', null);
+    const x = 598 + i * 45;
+    ctx.fillStyle = 'rgba(0,0,0,0.25)'; rr(x, 6, 42, 68, 8); ctx.fill();
+    ctx.save(); ctx.beginPath(); ctx.rect(x, 6, 42, 50); ctx.clip();
+    ctx.translate(x + 2, 14); ctx.scale(0.59, 0.59); drawItemIcon(item, 0, 4); ctx.restore();
+    txt(`${game.inv[item]}`, x + 21, 63, 16, game.inv[item] > 0 ? '#fff' : '#ff9a9a');
   });
 
   // Welle
@@ -1456,8 +1785,8 @@ function drawPlayerPanel(p, x) {
 
 function drawHints() {
   let s;
-  if (game.state === 'build') s = 'Bauen: E / Shift rechts  •  Baustein wechseln: Leertaste / Enter  •  Fertig? Geht zur Glocke und drückt Leertaste / Enter!';
-  else if (game.state === 'wave') s = 'Schwert: Leertaste / Enter (am Katapult: schießen)  •  Bauen & reparieren: E / Shift rechts  •  Sammelt die Geldsäcke!';
+  if (game.state === 'build') s = 'Bauen: E / Shift rechts  •  Bauteil wechseln: Leertaste / Enter  •  Fallen & Wackelschwert auch draußen  •  Fertig? Zur Glocke!';
+  else if (game.state === 'wave') s = 'Schwert: Leertaste / Enter (am Katapult: schießen, an der Zugbrücke: kurbeln)  •  Bauen & reparieren: E / Shift rechts';
   else return;
   if (game.single) s = s.replace(/ \/ Shift rechts/g, '').replace(/ \/ Enter/g, '');
   ctx.fillStyle = 'rgba(43,29,18,0.7)';
@@ -1486,33 +1815,33 @@ function drawBanner() {
 function drawMarket() {
   ctx.fillStyle = 'rgba(43,29,18,0.82)';
   ctx.fillRect(0, 0, W, H);
-  txt('Markt', W / 2, 70, 56, '#ffd23f');
-  txt('Was wollt ihr kaufen?', W / 2, 120, 24, '#fff');
-  drawBag({ x: W / 2 - 50, y: 182, t: 1 });
-  txt(`${game.coins} Taler`, W / 2 - 30, 166, 28, '#ffd23f', 'left');
+  txt('Markt', W / 2, 46, 48, '#ffd23f');
+  txt('Was wollt ihr kaufen?', W / 2, 90, 22, '#fff');
+  drawBag({ x: W / 2 - 50, y: 152, t: 1 });
+  txt(`${game.coins} Taler`, W / 2 - 30, 136, 26, '#ffd23f', 'left');
   const m = game.market;
   SHOP.forEach((item, i) => {
     const { x, y } = cardPos(i);
     ctx.fillStyle = item.id === 'go' ? '#d6f5c9' : '#f3e3bd';
     rr(x, y, CARD.w, CARD.h, 16); ctx.fill();
     ctx.strokeStyle = '#8a5a2b'; ctx.lineWidth = 4; ctx.stroke();
-    drawShopIcon(item.id, x + CARD.w / 2, y + 88);
-    txt(item.name, x + CARD.w / 2, y + 150, 22, '#2b1d12', 'center', null);
+    ctx.save(); ctx.translate(x + CARD.w / 2, y + 56); ctx.scale(0.62, 0.62); drawShopIcon(item.id, 0, 0); ctx.restore();
+    txt(item.name, x + CARD.w / 2, y + 110, 20, '#2b1d12', 'center', null);
     if (item.id === 'go') {
       game.players.forEach((p, j) => {
         const px = x + CARD.w / 2 + (game.players.length > 1 ? (j ? 50 : -50) : 0);
-        txt(m.ready[p.id] ? `${p.id ? 'Grün' : 'Blau'}: bereit!` : `${p.id ? 'Grün' : 'Blau'}: ...`, px, y + 184, 17, p.color, 'center', '#fff');
+        txt(m.ready[p.id] ? `${p.id ? 'Grün' : 'Blau'}: bereit!` : `${p.id ? 'Grün' : 'Blau'}: ...`, px, y + 136, 17, p.color, 'center', '#fff');
       });
     } else if (item.per) {
       game.players.forEach((p, j) => {
         const price = item.price(p);
         const px = x + CARD.w / 2 + (game.players.length > 1 ? (j ? 60 : -60) : 0);
         const label = price === null ? 'hast du' : `${price} Taler`;
-        txt(`${p.id ? 'Grün' : 'Blau'}: ${label}`, px, y + 184, 16, price !== null && price > game.coins ? '#c0392b' : p.color, 'center', '#fff');
+        txt(`${p.id ? 'Grün' : 'Blau'}: ${label}`, px, y + 136, 16, price !== null && price > game.coins ? '#c0392b' : p.color, 'center', '#fff');
       });
     } else {
       const price = item.price();
-      txt(price === null ? '—' : `${price} Taler`, x + CARD.w / 2, y + 184, 20, price !== null && price > game.coins ? '#c0392b' : '#8a5a2b', 'center', null);
+      txt(price === null ? '—' : `${price} Taler`, x + CARD.w / 2, y + 136, 18, price !== null && price > game.coins ? '#c0392b' : '#8a5a2b', 'center', null);
     }
   });
   game.players.forEach((p) => {
@@ -1524,7 +1853,7 @@ function drawMarket() {
   });
   txt(game.single
     ? 'Auswählen: Pfeiltasten / WASD  •  Kaufen: Leertaste / Enter  •  Wenn ihr fertig seid: „Weiter!" wählen'
-    : 'Blau: WASD + Leertaste   •   Grün: Pfeiltasten + Enter   •   Fertig? Beide „Weiter!" wählen', W / 2, 684, 18, '#fff3c4', 'center', null);
+    : 'Blau: WASD + Leertaste   •   Grün: Pfeiltasten + Enter   •   Fertig? Beide „Weiter!" wählen', W / 2, 700, 18, '#fff3c4', 'center', null);
   drawFloaters(true);
 }
 function drawShopIcon(id, cx, cy) {
@@ -1546,6 +1875,14 @@ function drawShopIcon(id, cx, cy) {
     ctx.save(); ctx.scale(1.4, 1.4); drawCatapult(-32, -40, null); ctx.restore();
   } else if (id === 'crossbow') {
     ctx.save(); ctx.scale(1.4, 1.4); drawCrossbowTower(-32, -40, null); ctx.restore();
+  } else if (id === 'moat') {
+    ctx.save(); ctx.scale(1.2, 1.2); drawMoat(-64, -36, null); drawMoat(0, -36, null); ctx.restore();
+  } else if (id === 'bridge') {
+    ctx.save(); ctx.scale(1.5, 1.5); drawBridge(-32, -36, null); ctx.restore();
+  } else if (id === 'trap') {
+    ctx.save(); ctx.scale(1.4, 1.4); drawTrap(-66, -40, null); drawTrap(0, -40, null); ctx.restore();
+  } else if (id === 'wobble') {
+    ctx.save(); ctx.scale(1.6, 1.6); drawWobble(-32, -40, null); ctx.restore();
   } else if (id === 'heal') {
     ctx.save(); ctx.scale(0.9, 0.9); drawHeart(0, 0, '#ff4d6d'); ctx.restore();
     txt('+10', 0, -2, 24, '#fff', 'center', '#b0203a');
