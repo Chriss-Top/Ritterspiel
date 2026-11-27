@@ -47,7 +47,7 @@ Mit `L` im Startbild schaltet ihr **unendlich Leben** an oder aus.
    - **Wackelschwert** (drinnen und draußen): ein Schwert auf einer Sprungfeder, das ständig hin und her wippt und Angreifer
      zurückwirft. Es hat immer das beste Schwert, das einer von euch gerade hat, bis hin zum Laserschwert.
 5. **Geldsäcke** einsammeln, die im Burghof auftauchen oder die fliehende Ritter fallen lassen.
-5. **Markt** nach jeder Welle: bessere Schwerter und Schilder, ein Pferd,
+6. **Markt** nach jeder Welle: bessere Schwerter und Schilder, ein Pferd,
    neue Bausteine, Katapulte, Armbrüste, Wassergraben, Zugbrücken, Fallen, Wackelschwerter oder Burg heilen.
 
 Wer alle 5 Wellen übersteht (am Ende kommt der Schwarze Ritter!), hat gewonnen.
